@@ -1,0 +1,45 @@
+#!/bin/sh
+# faceid PAM helper - invoked by pam_exec.so from inside the PAM stack.
+#
+# Each of the following is a bug that has actually bitten this project:
+#
+#   * ABSOLUTE PATHS plus an explicit PATH.  pam_exec hands the child whatever
+#     environment the calling process happened to have, which is not always a
+#     useful one - a bare `timeout` can be "command not found" (exit 127).
+#   * a HARD TIMEOUT, so a wedged camera or a slow USB bus can never block
+#     `sudo` or the login greeter.  timeout exits 124, which is non-zero, so
+#     PAM correctly falls through to the password prompt.
+#   * a NON-ZERO EXIT on any failure.  We are installed as `auth sufficient`,
+#     never `required` - face auth can only ever save you typing a password.
+#   * a DIAGNOSTIC LOG.  `pam_exec.so quiet` sends nothing to syslog, so a
+#     silent failure ("sudo still asks for my password") is otherwise
+#     impossible to debug.  One line per attempt, in the data directory.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+LOG=/var/lib/faceid/pam-debug.log
+
+OUT=$(/usr/bin/timeout -k 2 12 /usr/local/bin/faceid auth --why "$@" 2>&1)
+RC=$?
+
+if [ -d /var/lib/faceid ]; then
+    # keep the log from growing without bound
+    if [ -f "$LOG" ]; then
+        SZ=$(/usr/bin/wc -c < "$LOG" 2>/dev/null || echo 0)
+        if [ "$SZ" -gt 65536 ] 2>/dev/null; then
+            /usr/bin/tail -n 200 "$LOG" > "$LOG.tmp" 2>/dev/null && \
+                /usr/bin/mv "$LOG.tmp" "$LOG" 2>/dev/null
+        fi
+    fi
+    {
+        /usr/bin/printf '%s rc=%s user=%s ruser=%s service=%s tty=%s rhost=%s\n' \
+            "$(/usr/bin/date -Is)" "$RC" "${PAM_USER:-}" "${PAM_RUSER:-}" \
+            "${PAM_SERVICE:-}" "${PAM_TTY:-}" "${PAM_RHOST:-}"
+        if [ -n "$OUT" ]; then
+            /usr/bin/printf '%s\n' "$OUT" | /usr/bin/grep -v 'WARN:' | \
+                /usr/bin/sed 's/^/    /'
+        fi
+    } >> "$LOG" 2>/dev/null
+fi
+
+exit $RC

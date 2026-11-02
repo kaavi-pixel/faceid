@@ -1,0 +1,32 @@
+# The two ONNX models are ~39 MB and are fetched by `faceid models --download`
+# (with sha256 verification) rather than stored in git.
+models/*.onnx
+models/*.part
+
+# Real face images from your own camera.  Never commit these: a face image is
+# biometric data and a test fixture is the easiest way to leak one by accident.
+tests/fixtures/
+tests/pam.capture.conf
+*.png
+*.jpg
+*.jpeg
+*.mp4
+!docs/*.png
+
+# Enrolments and derived data
+gallery.npz
+gallery.json
+accessory_model.npz
+pam-debug.log
+*.dat
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+*.bak
+*~
