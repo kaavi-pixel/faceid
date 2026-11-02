@@ -32,14 +32,22 @@ def pam_env() -> dict:
 
 
 def is_remote(env: dict | None = None) -> tuple[bool, str]:
+    """Is this authentication request coming from somewhere other than the
+    machine's own console?
+
+    Do NOT use the tty path as the signal.  A terminal emulator inside the
+    desktop session runs on a pseudo-terminal (`/dev/pts/0`), which looks
+    exactly like an SSH session's pty - and treating it as remote meant face
+    auth silently skipped itself every single time sudo was run from a normal
+    terminal window.  The reliable signals are PAM_RHOST (set by sshd and
+    friends) and the SSH_* environment.
+    """
     env = env or pam_env()
     if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
         return True, "SSH session"
     rhost = (env.get("PAM_RHOST") or "").strip()
     if rhost and rhost not in ("localhost", "127.0.0.1", "::1"):
         return True, f"remote host {rhost}"
-    if env.get("PAM_TTY", "").startswith("/dev/pts/"):
-        return True, f"pseudo-terminal {env['PAM_TTY']}"
     return False, "local"
 
 

@@ -303,7 +303,43 @@ def test_pam_local_session_detected():
     assert P.is_remote({"PAM_RHOST": "", "PAM_TTY": "tty1"})[0] is False
     assert P.is_remote({"PAM_RHOST": "localhost", "PAM_TTY": "tty1"})[0] is False
     assert P.is_remote({"PAM_RHOST": "192.168.1.9", "PAM_TTY": ""})[0] is True
-    assert P.is_remote({"PAM_RHOST": "", "PAM_TTY": "/dev/pts/3"})[0] is True
+    assert P.is_remote({"PAM_RHOST": "", "PAM_TTY": "/dev/tty1"})[0] is False
+
+
+def test_graphical_terminal_is_local_not_remote():
+    """Regression, and the bug that made sudo never use the face at all.
+
+    A terminal emulator inside the desktop runs on /dev/pts/N. SSH also uses
+    /dev/pts/N. Treating the pty path as "remote" meant the helper aborted
+    with 'pseudo-terminal /dev/pts/0' every time sudo was run from a terminal
+    window - so face auth was skipped 100% of the time for the one case the
+    whole project exists to serve. It passed in the test harness only because
+    the harness had no controlling tty.
+    """
+    from faceid import pam as P
+    for tty in ("/dev/pts/0", "/dev/pts/3", "/dev/pts/99"):
+        remote, why = P.is_remote({"PAM_RHOST": "", "PAM_TTY": tty})
+        assert remote is False, f"{tty} wrongly treated as remote ({why})"
+
+    # ...but a genuinely remote request is still refused
+    assert P.is_remote({"PAM_RHOST": "10.0.0.5", "PAM_TTY": "/dev/pts/0"})[0] is True
+
+    # and end to end through the decision function
+    saved = {k: os.environ.get(k) for k in ("PAM_TTY", "PAM_RHOST", "PAM_SERVICE",
+                                            "PAM_USER", "PAM_RUSER", "SSH_CONNECTION")}
+    try:
+        os.environ.pop("SSH_CONNECTION", None)
+        os.environ["PAM_TTY"] = "/dev/pts/0"
+        os.environ["PAM_RHOST"] = ""
+        os.environ["PAM_SERVICE"] = "sudo"
+        d = P.should_attempt(load_config(extra_files=[]), "sudo")
+        assert d.attempt, f"face auth skipped from a normal terminal: {d.reason}"
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 # ---------------------------------------------------------------- pam install

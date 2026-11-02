@@ -11,21 +11,21 @@ without re-deriving anything.
 
 ## 1. TL;DR
 
-The software is built, installed, tested (**34/34**) and published.
+The software is built, installed, tested (**35/35**) and published.
 
-The **PAM integration is proven** — authenticating against the real `sudo`
-stack returns success with no password:
+**Root cause of "sudo never uses the face" found and fixed.** The helper was
+treating `PAM_TTY=/dev/pts/0` as a *remote* session, because a pseudo-terminal
+looks the same whether it is an SSH login or a terminal window on the desktop.
+So face auth skipped itself with `aborting: pseudo-terminal /dev/pts/0` on
+**every** `sudo` run from a terminal — the one case the project exists for.
+The test harness passed only because it had no controlling tty.
+
+With the check removed, the exact failing environment now succeeds:
 
 ```
-PAM_USER=$USER : pam_authenticate -> 0 (Success)
-PAM_USER=root  : pam_authenticate -> 0 (Success)
-helper log     : rc=0 user=$USER ruser=$USER service=sudo
-                 rc=0 user=root   ruser=      service=sudo
+PAM_TTY=/dev/pts/0  PAM_USER=root  PAM_SERVICE=sudo
+  -> ACCEPT verified $USER via 'headphones' tag (sim 0.490, 5/5 frames)   exit=0
 ```
-
-What is **not** yet proven is a bare `sudo` command end-to-end. The two
-attempts so far returned `rc=1` from the face pipeline (no face in frame) and
-the installed helper was too old to record *why*.
 
 **The single next action:**
 
@@ -33,8 +33,12 @@ the installed helper was too old to record *why*.
 cd ~/faceid && sudo ./install.sh && sudo -k && sudo -n true; faceid pam log
 ```
 
-Look at the camera when it runs. `sudo -n` cannot prompt, so success means the
-face alone satisfied PAM. The log line carries the verdict either way.
+`sudo -n` cannot prompt, so success means the face alone satisfied PAM. The
+log line now carries the verdict either way.
+
+Two follow-ups worth noting from the recovery run: the match came in at
+**sim 0.490 against a 0.400 threshold**, which is thin. Re-enrol and run
+`faceid calibrate --apply` before trusting the default (see Phase 2).
 
 ---
 
@@ -250,6 +254,24 @@ syslog.
 `--user` that is not the login name produces a gallery PAM will never ask for.
 **Fix:** `faceid enroll` defaults to the current account — do not override it.
 The failure message now lists the names the gallery actually holds.
+
+### 6.9 A pseudo-terminal is not a remote session
+**Symptom:** face auth silently never fires for `sudo` run from a terminal
+window, while a hand-built test harness succeeds. The log shows
+`rc=1 ... tty=/dev/pts/0` with no useful reason (older helpers logged none).
+**Cause:** the "is this remote?" check treated any `PAM_TTY` starting with
+`/dev/pts/` as an SSH session. But a terminal emulator inside the desktop
+session is *also* on `/dev/pts/N`, so the check marked every ordinary local
+`sudo` as remote and the helper aborted itself before touching the camera.
+**Fix:** decide remoteness on `PAM_RHOST` and the `SSH_*` environment only —
+never on the tty path. A graphical terminal is local. This was the single
+reason face auth had never once run for a real `sudo`, and it was invisible
+precisely because `abort_if_ssh` is a *safety* feature, so skipping looked
+like correct behaviour rather than a fault.
+
+**Lesson:** safety switches that skip work are the hardest bugs to see. Make
+the skip *loud* — a one-line reason in the log — or you will debug the camera
+for hours while the code never loads it.
 
 ---
 

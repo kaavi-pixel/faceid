@@ -29,20 +29,18 @@ in the target environment · `[ ]` not started · `[!]` blocked
 
 ---
 
-## Phase 1 — close the loop on sudo `[!]` **← the only blocker right now**
+## Phase 1 — close the loop on sudo `[~]`
 
 The PAM wiring is proven: authenticating against the **real** `sudo` stack
 returns `pam_authenticate -> 0 (Success)` with no password, for both
-`PAM_USER=$USER` and `PAM_USER=root`. What is not yet proven end-to-end is a
-bare `sudo` command, because the two attempts so far returned `rc=1` from the
-face pipeline (face not in frame) and the installed helper was too old to
-record *why*.
+`PAM_USER=$USER` and `PAM_USER=root`.
 
-`[!]` `/usr/local/lib/faceid/faceid/cli.py` and `/usr/local/bin/faceid-pam`
-are **stale** relative to the working tree. The helper lacks `--why`, so a
-failure logs a bare `rc=1` with no reason. Fix by re-running the installer.
-
-- [ ] Re-run `sudo ./install.sh` to sync `cli.py` + the helper
+- [x] Identify why a bare `sudo` never used the face — `PAM_TTY=/dev/pts/N`
+      was misread as a remote session, so the helper skipped itself every
+      time (see trap 9). Fixed; the failing environment now returns
+      `ACCEPT ... exit=0`.
+- [x] Make failures self-explanatory — helper logs `--why`, `faceid pam log`
+- [ ] Re-run `sudo ./install.sh` to push the fixed `pam.py` to `/usr/local`
 - [ ] Run one `sudo` **while looking at the camera**; confirm zero keystrokes
 - [ ] Read `faceid pam log`; if `rc=1`, act on the logged reason
 - [ ] Confirm over several days that it is not flaky
@@ -157,6 +155,9 @@ Every one of these cost real time and looked like a different bug:
 7. `pam_exec.so quiet` making failures completely invisible.
 8. Enrolling under a `--user` that is not the login name → gallery keyed
    under a name PAM will never ask for.
+9. **A pseudo-terminal treated as a remote session** → face auth skipped
+   itself on every `sudo` from a terminal window. Safety switches that skip
+   work hide their own failures; make the skip verbose.
 
 ---
 
